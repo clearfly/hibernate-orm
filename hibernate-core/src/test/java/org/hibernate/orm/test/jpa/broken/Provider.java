@@ -4,6 +4,9 @@
  */
 package org.hibernate.orm.test.jpa.broken;
 
+import java.io.Serializable;
+import java.util.Objects;
+
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -11,9 +14,6 @@ import jakarta.persistence.Id;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Transient;
 import jakarta.persistence.Version;
-
-import java.io.Serializable;
-import java.util.Objects;
 
 @Entity
 public class Provider implements Serializable {
@@ -57,8 +57,8 @@ public class Provider implements Serializable {
 
 	@Override
 	public boolean equals(Object o) {
-		if (o instanceof Provider provider) {
-			return this == o || getId().equals(provider.getId());
+		if ( o instanceof Provider provider ) {
+			return this == o || getId().equals( provider.getId() );
 		}
 		else {
 			return false;
@@ -67,6 +67,6 @@ public class Provider implements Serializable {
 
 	@Override
 	public int hashCode() {
-		return Objects.hashCode(id);
+		return Objects.hashCode( id );
 	}
 }

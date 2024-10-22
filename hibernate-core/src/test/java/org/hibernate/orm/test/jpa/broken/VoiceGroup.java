@@ -4,6 +4,9 @@
  */
 package org.hibernate.orm.test.jpa.broken;
 
+import java.io.Serializable;
+import java.util.Objects;
+
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -15,10 +18,7 @@ import jakarta.persistence.NamedEntityGraph;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Version;
 
-import java.io.Serializable;
-import java.util.Objects;
-
-@NamedEntityGraph(name = "voiceGroup.graph", attributeNodes = { @NamedAttributeNode("primaryNumber")})
+@NamedEntityGraph(name = "voiceGroup.graph", attributeNodes = { @NamedAttributeNode("primaryNumber") })
 @Entity
 public class VoiceGroup implements Serializable {
 
@@ -57,8 +57,8 @@ public class VoiceGroup implements Serializable {
 
 	@Override
 	public boolean equals(Object o) {
-		if (o instanceof VoiceGroup voiceGroup) {
-			return this == o || getId().equals(voiceGroup.getId());
+		if ( o instanceof VoiceGroup voiceGroup ) {
+			return this == o || getId().equals( voiceGroup.getId() );
 		}
 		else {
 			return false;
@@ -67,6 +67,6 @@ public class VoiceGroup implements Serializable {
 
 	@Override
 	public int hashCode() {
-		return Objects.hashCode(id);
+		return Objects.hashCode( id );
 	}
 }

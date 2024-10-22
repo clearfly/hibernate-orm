@@ -24,6 +24,7 @@ public class TelephoneNumber implements Serializable {
 	private String number;
 	private VoiceGroup voiceGroup;
 	private Provider provider;
+	private RateCenter rateCenter;
 
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -70,6 +71,16 @@ public class TelephoneNumber implements Serializable {
 
 	public void setProvider(Provider provider) {
 		this.provider = provider;
+	}
+
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "rateCenter", nullable = false)
+	public RateCenter getRateCenter() {
+		return rateCenter;
+	}
+
+	public void setRateCenter(RateCenter rateCenter) {
+		this.rateCenter = rateCenter;
 	}
 
 	@Override

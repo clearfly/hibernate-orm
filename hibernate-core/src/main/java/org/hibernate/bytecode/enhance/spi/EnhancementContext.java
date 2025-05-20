@@ -6,7 +6,10 @@
  */
 package org.hibernate.bytecode.enhance.spi;
 
+import org.hibernate.bytecode.spi.BytecodeProvider;
+
 import jakarta.persistence.metamodel.Type;
+import org.hibernate.Incubating;
 
 /**
  * The context for performing an enhancement.  Enhancement can happen in any number of ways:<ul>
@@ -146,4 +149,26 @@ public interface EnhancementContext {
 	boolean isDiscoveredType(UnloadedClass classDescriptor);
 
 	void registerDiscoveredType(UnloadedClass classDescriptor, Type.PersistenceType type);
+
+	/**
+	 * @return The expected behavior when encountering a class that cannot be enhanced,
+	 * in particular when attribute names don't match field names.
+	 * @see <a href="https://hibernate.atlassian.net/browse/HHH-16572">HHH-16572</a>
+	 * @see <a href="https://hibernate.atlassian.net/browse/HHH-18833">HHH-18833</a>
+	 */
+	@Incubating
+	default UnsupportedEnhancementStrategy getUnsupportedEnhancementStrategy() {
+		return UnsupportedEnhancementStrategy.SKIP;
+	}
+
+	/**
+	 * Allows to force the use of a specific instance of BytecodeProvider to perform the enhancement.
+	 * @return When returning {code null} the default implementation will be used. Only return a different instance if
+	 * you need to override the default implementation.
+	 */
+	@Incubating
+	default BytecodeProvider getBytecodeProvider() {
+		return null;
+	}
+
 }

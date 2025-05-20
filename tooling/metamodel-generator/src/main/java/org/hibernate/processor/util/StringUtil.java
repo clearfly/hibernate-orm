@@ -8,6 +8,10 @@ package org.hibernate.processor.util;
 
 import java.util.Locale;
 
+import static java.lang.Character.charCount;
+import static java.lang.Character.isUpperCase;
+import static java.lang.Character.toUpperCase;
+
 /**
  * @author Hardy Ferentschik
  */
@@ -102,8 +106,24 @@ public final class StringUtil {
 		return name.replaceAll("[\\s.\\-!@#%=+/*^&|(){}\\[\\],]", "_");
 	}
 
-	public static String getUpperUnderscoreCaseFromLowerCamelCase(String lowerCamelCaseString){
-		return lowerCamelCaseString.replaceAll("(.)(\\p{Upper})", "$1_$2").toUpperCase(Locale.ROOT);
+	public static String getUpperUnderscoreCaseFromLowerCamelCase(String lowerCamelCaseString) {
+		final StringBuilder result = new StringBuilder();
+		int position = 0;
+		boolean wasLowerCase = false;
+		while ( position < lowerCamelCaseString.length() ) {
+			final int codePoint = lowerCamelCaseString.codePointAt( position );
+			final boolean isUpperCase = isUpperCase( codePoint );
+			if ( wasLowerCase && isUpperCase ) {
+				result.append('_');
+			}
+			result.appendCodePoint( toUpperCase( codePoint ) );
+			position += charCount( codePoint );
+			wasLowerCase = !isUpperCase;
+		}
+		if ( result.toString().equals( lowerCamelCaseString ) ) {
+			result.insert(0, '_');
+		}
+		return result.toString();
 	}
 
 	private static boolean startsWithSeveralUpperCaseLetters(String string) {

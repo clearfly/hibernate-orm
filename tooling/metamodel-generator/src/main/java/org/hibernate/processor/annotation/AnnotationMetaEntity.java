@@ -33,7 +33,6 @@ import org.hibernate.query.sqm.tree.SqmStatement;
 import org.hibernate.query.sqm.tree.expression.SqmParameter;
 import org.hibernate.query.sqm.tree.select.SqmSelectStatement;
 
-import javax.annotation.processing.ProcessingEnvironment;
 import javax.lang.model.element.AnnotationMirror;
 import javax.lang.model.element.AnnotationValue;
 import javax.lang.model.element.Element;
@@ -51,7 +50,6 @@ import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
 import javax.lang.model.type.TypeVariable;
 import javax.lang.model.type.WildcardType;
-import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
 import javax.tools.Diagnostic;
 import java.util.ArrayList;
@@ -86,10 +84,12 @@ import static org.hibernate.processor.util.NullnessUtil.castNonNull;
 import static org.hibernate.processor.util.TypeUtils.containsAnnotation;
 import static org.hibernate.processor.util.TypeUtils.determineAccessTypeForHierarchy;
 import static org.hibernate.processor.util.TypeUtils.determineAnnotationSpecifiedAccessType;
+import static org.hibernate.processor.util.TypeUtils.extendsClass;
 import static org.hibernate.processor.util.TypeUtils.findMappedSuperClass;
 import static org.hibernate.processor.util.TypeUtils.getAnnotationMirror;
 import static org.hibernate.processor.util.TypeUtils.getAnnotationValue;
 import static org.hibernate.processor.util.TypeUtils.hasAnnotation;
+import static org.hibernate.processor.util.TypeUtils.implementsInterface;
 import static org.hibernate.processor.util.TypeUtils.primitiveClassMatchesKind;
 import static org.hibernate.processor.util.TypeUtils.propertyName;
 
@@ -660,41 +660,18 @@ public class AnnotationMetaEntity extends AnnotationMeta {
 	}
 
 	private boolean isPanacheType(TypeElement type) {
-		return isOrmPanacheType( type )
-			|| isReactivePanacheType( type );
+		return context.usesQuarkusOrm() && isOrmPanacheType( type )
+			|| context.usesQuarkusReactive() && isReactivePanacheType( type );
 	}
 
 	private boolean isOrmPanacheType(TypeElement type) {
-		final ProcessingEnvironment processingEnvironment = context.getProcessingEnvironment();
-		final Elements elements = processingEnvironment.getElementUtils();
-		final TypeElement panacheRepositorySuperType = elements.getTypeElement( PANACHE_ORM_REPOSITORY_BASE );
-		final TypeElement panacheEntitySuperType = elements.getTypeElement( PANACHE_ORM_ENTITY_BASE );
-		if ( panacheRepositorySuperType == null || panacheEntitySuperType == null ) {
-			return false;
-		}
-		else {
-			final Types types = processingEnvironment.getTypeUtils();
-			// check against a raw supertype of PanacheRepositoryBase, which .asType() is not
-			return types.isSubtype( type.asType(), types.getDeclaredType( panacheRepositorySuperType ) )
-				|| types.isSubtype( type.asType(), panacheEntitySuperType.asType() );
-		}
+		return implementsInterface( type, PANACHE_ORM_REPOSITORY_BASE )
+			|| extendsClass( type, PANACHE_ORM_ENTITY_BASE );
 	}
 
 	private boolean isReactivePanacheType(TypeElement type) {
-		final ProcessingEnvironment processingEnvironment = context.getProcessingEnvironment();
-		final Elements elements = processingEnvironment.getElementUtils();
-		final TypeElement panacheRepositorySuperType = elements.getTypeElement( PANACHE_REACTIVE_REPOSITORY_BASE );
-		final TypeElement panacheEntitySuperType = elements.getTypeElement( PANACHE_REACTIVE_ENTITY_BASE );
-
-		if ( panacheRepositorySuperType == null || panacheEntitySuperType == null ) {
-			return false;
-		}
-		else {
-			final Types types = processingEnvironment.getTypeUtils();
-			// check against a raw supertype of PanacheRepositoryBase, which .asType() is not
-			return types.isSubtype( type.asType(), types.getDeclaredType( panacheRepositorySuperType ) )
-				|| types.isSubtype( type.asType(), panacheEntitySuperType.asType() );
-		}
+		return implementsInterface( type, PANACHE_REACTIVE_REPOSITORY_BASE )
+			|| extendsClass( type, PANACHE_REACTIVE_ENTITY_BASE );
 	}
 
 	/**
@@ -1921,25 +1898,28 @@ public class AnnotationMetaEntity extends AnnotationMeta {
 					);
 					break;
 				case NATURAL_ID:
-					putMember( methodKey,
-							new NaturalIdFinderMethod(
-									this, method,
-									methodName,
-									returnType.toString(),
-									containerType,
-									paramNames,
-									paramTypes,
-									parameterNullability(method, entity),
-									repository,
-									sessionType[0],
-									sessionType[1],
-									profiles,
-									context.addNonnullAnnotation(),
-									jakartaDataRepository,
-									fullReturnType(method)
-							)
-					);
-					break;
+					if ( !usingStatelessSession( sessionType[0] ) ) {// no byNaturalId() lookup API for SS
+						putMember( methodKey,
+								new NaturalIdFinderMethod(
+										this, method,
+										methodName,
+										returnType.toString(),
+										containerType,
+										paramNames,
+										paramTypes,
+										parameterNullability(method, entity),
+										repository,
+										sessionType[0],
+										sessionType[1],
+										profiles,
+										context.addNonnullAnnotation(),
+										jakartaDataRepository,
+										fullReturnType(method)
+								)
+						);
+						break;
+					}
+					// else intentionally fall through
 				case BASIC:
 				case MULTIVALUED:
 					final List<Boolean> paramPatterns = parameterPatterns( method );
@@ -2128,7 +2108,8 @@ public class AnnotationMetaEntity extends AnnotationMeta {
 
 	private boolean finderParameterNullable(TypeElement entity, VariableElement param) {
 		final Element member = memberMatchingPath( entity, parameterName( param ) );
-		return member == null || isNullable(member);
+		return isNullable( param )
+			&& ( member == null || isNullable( member ) );
 	}
 
 	private AccessType getAccessType(TypeElement entity) {
@@ -2981,30 +2962,29 @@ public class AnnotationMetaEntity extends AnnotationMeta {
 					return false;
 				}
 			case FIELD:
+			case PARAMETER:
 				if ( member.asType().getKind().isPrimitive() ) {
 					return false;
 				}
 		}
-		boolean nullable = true;
 		for ( AnnotationMirror mirror : member.getAnnotationMirrors() ) {
 			final TypeElement annotationType = (TypeElement) mirror.getAnnotationType().asElement();
 			final Name name = annotationType.getQualifiedName();
-			if ( name.contentEquals(Constants.ID) ) {
-				nullable = false;
+			if ( name.contentEquals(Constants.ID)
+				|| name.contentEquals(Constants.NOT_NULL)
+				|| name.contentEquals(Constants.NONNULL) ) {
+				return false;
 			}
-			if ( name.contentEquals("jakarta.validation.constraints.NotNull")) {
-				nullable = false;
-			}
-			if ( name.contentEquals(Constants.BASIC)
+			else if ( name.contentEquals(Constants.BASIC)
 					|| name.contentEquals(Constants.MANY_TO_ONE)
 					|| name.contentEquals(Constants.ONE_TO_ONE)) {
-				AnnotationValue optional = getAnnotationValue(mirror, "optional");
+				final AnnotationValue optional = getAnnotationValue(mirror, "optional");
 				if ( optional != null && optional.getValue().equals(FALSE) ) {
-					nullable = false;
+					return false;
 				}
 			}
 		}
-		return nullable;
+		return true;
 	}
 
 	private void checkParameters(

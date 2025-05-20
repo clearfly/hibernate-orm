@@ -918,6 +918,10 @@ public class ToOneAttributeMapping
 		return cardinality;
 	}
 
+	public boolean hasJoinTable() {
+		return hasJoinTable;
+	}
+
 	@Override
 	public EntityMappingType getMappedType() {
 		return getEntityMappingType();
@@ -1557,7 +1561,19 @@ public class ToOneAttributeMapping
 
 		 having the left join we don't want to add an extra implicit join that will be translated into an SQL inner join (see HHH-15342)
 		*/
-		if ( fetchTiming == FetchTiming.IMMEDIATE && selected ) {
+
+		final ForeignKeyDescriptor.Nature resolvingKeySideOfForeignKey = creationState.getCurrentlyResolvingForeignKeyPart();
+		final ForeignKeyDescriptor.Nature side;
+		if ( resolvingKeySideOfForeignKey == ForeignKeyDescriptor.Nature.KEY && this.sideNature == ForeignKeyDescriptor.Nature.TARGET ) {
+			// If we are currently resolving the key part of a foreign key we do not want to add joins.
+			// So if the lhs of this association is the target of the FK, we have to use the KEY part to avoid a join
+			side = ForeignKeyDescriptor.Nature.KEY;
+		}
+		else {
+			side = this.sideNature;
+		}
+
+		if ( ( fetchTiming == FetchTiming.IMMEDIATE && selected ) || needsJoinFetch( side ) ) {
 			final TableGroup tableGroup = determineTableGroupForFetch(
 					fetchablePath,
 					fetchParent,
@@ -1587,8 +1603,7 @@ public class ToOneAttributeMapping
 							}
 						}
 						else if ( hasNotFoundAction()
-								|| getAssociatedEntityMappingType().getSoftDeleteMapping() != null
-								|| affectedByEnabledFilters ) {
+								|| getAssociatedEntityMappingType().getSoftDeleteMapping() != null ) {
 							// For the target side only add keyResult when a not-found action is present
 							keyResult = foreignKeyDescriptor.createTargetDomainResult(
 									fetchablePath,
@@ -1636,16 +1651,6 @@ public class ToOneAttributeMapping
 
 		 */
 
-		final ForeignKeyDescriptor.Nature resolvingKeySideOfForeignKey = creationState.getCurrentlyResolvingForeignKeyPart();
-		final ForeignKeyDescriptor.Nature side;
-		if ( resolvingKeySideOfForeignKey == ForeignKeyDescriptor.Nature.KEY && this.sideNature == ForeignKeyDescriptor.Nature.TARGET ) {
-			// If we are currently resolving the key part of a foreign key we do not want to add joins.
-			// So if the lhs of this association is the target of the FK, we have to use the KEY part to avoid a join
-			side = ForeignKeyDescriptor.Nature.KEY;
-		}
-		else {
-			side = this.sideNature;
-		}
 		final DomainResult<?> keyResult;
 		if ( side == ForeignKeyDescriptor.Nature.KEY ) {
 			final TableGroup tableGroup = sideNature == ForeignKeyDescriptor.Nature.KEY
@@ -1695,6 +1700,22 @@ public class ToOneAttributeMapping
 				selectByUniqueKey,
 				creationState
 		);
+	}
+
+	private boolean needsJoinFetch(ForeignKeyDescriptor.Nature side) {
+		if ( side == ForeignKeyDescriptor.Nature.TARGET ) {
+			// The target model part doesn't correspond to the identifier of the target entity mapping
+			// so we must eagerly fetch with a join (subselect would still cause problems).
+			final EntityIdentifierMapping identifier = entityMappingType.getIdentifierMapping();
+			final ValuedModelPart targetPart = foreignKeyDescriptor.getTargetPart();
+			if ( identifier != targetPart ) {
+				// If the identifier and the target part of the same class, we can preserve laziness as deferred loading will still work
+				return identifier.getExpressibleJavaType().getJavaTypeClass() != targetPart.getExpressibleJavaType()
+						.getJavaTypeClass();
+			}
+		}
+
+		return false;
 	}
 
 	private boolean isAffectedByEnabledFilters(DomainResultCreationState creationState) {

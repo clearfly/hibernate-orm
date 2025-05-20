@@ -105,8 +105,10 @@ public abstract class AnnotationMeta implements Metamodel {
 											context.getEntityNameMappings(), context.getEnumTypesByValue() )
 							);
 					if ( statement instanceof SqmSelectStatement
-							&& isQueryMethodName( name ) ) {
+							&& isQueryMethodName( name )
+							&& !isJakartaDataStyle() ) {
 						putMember( name,
+								// TODO: respect @NamedQuery(resultClass)
 								new NamedQueryMethod(
 										this,
 										(SqmSelectStatement<?>) statement,
@@ -153,15 +155,17 @@ public abstract class AnnotationMeta implements Metamodel {
 	}
 
 	private void addAuxiliaryMembersForMirror(AnnotationMirror mirror, String prefix) {
-		mirror.getElementValues().forEach((key, value) -> {
-			if ( key.getSimpleName().contentEquals("name") ) {
-				final String name = value.getValue().toString();
-				if ( !name.isEmpty() ) {
-					putMember( prefix + name,
-							new NameMetaAttribute( this, name, prefix ) );
+		if ( !isJakartaDataStyle() ) {
+			mirror.getElementValues().forEach((key, value) -> {
+				if ( key.getSimpleName().contentEquals( "name" ) ) {
+					final String name = value.getValue().toString();
+					if ( !name.isEmpty() ) {
+						putMember( prefix + name,
+								new NameMetaAttribute( this, name, prefix ) );
+					}
 				}
-			}
-		});
+			});
+		}
 	}
 
 	protected String getSessionVariableName() {

@@ -25,8 +25,8 @@ import org.hibernate.boot.spi.MetadataImplementor;
 import org.hibernate.internal.EntityManagerMessageLogger;
 import org.hibernate.internal.HEMLogging;
 import org.hibernate.internal.util.ReflectHelper;
+import org.hibernate.internal.util.collections.ArrayHelper;
 import org.hibernate.internal.util.collections.CollectionHelper;
-import org.hibernate.internal.util.collections.JoinedList;
 import org.hibernate.mapping.Component;
 import org.hibernate.mapping.MappedSuperclass;
 import org.hibernate.mapping.PersistentClass;
@@ -60,8 +60,6 @@ import jakarta.persistence.metamodel.Attribute;
 import jakarta.persistence.metamodel.IdentifiableType;
 import jakarta.persistence.metamodel.SingularAttribute;
 import jakarta.persistence.metamodel.Type;
-
-import static org.hibernate.internal.util.StringHelper.root;
 
 /**
  * Defines a context for storing information during the building of the {@link MappingMetamodelImpl}.
@@ -279,8 +277,10 @@ public class MetadataContext {
 			attribute = factoryFunction.apply( entityType, genericProperty );
 			if ( !property.isGeneric() ) {
 				final PersistentAttribute<X, ?> concreteAttribute = factoryFunction.apply( entityType, property );
-				//noinspection unchecked
-				( (AttributeContainer<X>) entityType ).getInFlightAccess().addConcreteGenericAttribute( concreteAttribute );
+				if ( concreteAttribute != null ) {
+					//noinspection unchecked
+					( (AttributeContainer<X>) entityType ).getInFlightAccess().addConcreteGenericAttribute( concreteAttribute );
+				}
 			}
 		}
 		else {
@@ -365,7 +365,13 @@ public class MetadataContext {
 //					applyNaturalIdAttribute( safeMapping, jpaType );
 
 					for ( Property property : safeMapping.getDeclaredProperties() ) {
-						if ( safeMapping.isVersioned() && property == safeMapping.getVersion() ) {
+						if ( isIdentifierProperty( property, safeMapping ) ) {
+							// property represents special handling for id-class mappings but we have already
+							// accounted for the embedded property mappings in #applyIdMetadata &&
+							// #buildIdClassAttributes
+							continue;
+						}
+						else if ( safeMapping.isVersioned() && property == safeMapping.getVersion() ) {
 							// skip the version property, it was already handled previously.
 							continue;
 						}
@@ -377,7 +383,7 @@ public class MetadataContext {
 						if ( attribute != null ) {
 							addAttribute( jpaType, attribute );
 							if ( property.isNaturalIdentifier() ) {
-								( ( AttributeContainer<Object>) jpaType ).getInFlightAccess()
+								( (AttributeContainer<Object>) jpaType ).getInFlightAccess()
 										.applyNaturalIdAttribute( attribute );
 							}
 						}
@@ -443,6 +449,14 @@ public class MetadataContext {
 				}
 			}
 		}
+	}
+
+	private static boolean isIdentifierProperty(Property property, MappedSuperclass mappedSuperclass) {
+		final Component identifierMapper = mappedSuperclass.getIdentifierMapper();
+		return identifierMapper != null && ArrayHelper.contains(
+				identifierMapper.getPropertyNames(),
+				property.getName()
+		);
 	}
 
 	private void addAttribute(ManagedDomainType<?> type, PersistentAttribute<Object, ?> attribute) {
@@ -561,15 +575,24 @@ public class MetadataContext {
 		return null;
 	}
 
-	private EmbeddableTypeImpl<?> applyIdClassMetadata(Component idClassComponent) {
-		final JavaTypeRegistry registry = getTypeConfiguration()
-				.getJavaTypeRegistry();
-		final Class<?> componentClass = idClassComponent.getComponentClass();
-		final JavaType<?> javaType = registry.resolveManagedTypeDescriptor( componentClass );
+	private <Y> EmbeddableTypeImpl<Y> applyIdClassMetadata(Component idClassComponent) {
+		final JavaType<Y> javaType =
+				getTypeConfiguration().getJavaTypeRegistry()
+						.resolveManagedTypeDescriptor( idClassComponent.getComponentClass() );
 
-		final EmbeddableTypeImpl<?> embeddableType = new EmbeddableTypeImpl<>(
+		final MappedSuperclass mappedSuperclass = idClassComponent.getMappedSuperclass();
+		final MappedSuperclassDomainType<? super Y> superType;
+		if ( mappedSuperclass != null ) {
+			//noinspection unchecked
+			superType = (MappedSuperclassDomainType<? super Y>) locateMappedSuperclassType( mappedSuperclass );
+		}
+		else {
+			superType = null;
+		}
+
+		final EmbeddableTypeImpl<Y> embeddableType = new EmbeddableTypeImpl<>(
 				javaType,
-				null,
+				superType,
 				null,
 				false,
 				getJpaMetamodel()
@@ -579,27 +602,29 @@ public class MetadataContext {
 	}
 
 	private <X> void applyIdMetadata(MappedSuperclass mappingType, MappedSuperclassDomainType<X> jpaMappingType) {
+		@SuppressWarnings("unchecked")
+		final AttributeContainer<X> attributeContainer = (AttributeContainer<X>) jpaMappingType;
 		if ( mappingType.hasIdentifierProperty() ) {
 			final Property declaredIdentifierProperty = mappingType.getDeclaredIdentifierProperty();
 			if ( declaredIdentifierProperty != null ) {
-				//noinspection unchecked
-				final SingularPersistentAttribute<X, Object> attribute = (SingularPersistentAttribute<X, Object>) buildAttribute(
-						declaredIdentifierProperty,
-						jpaMappingType,
-						attributeFactory::buildIdAttribute
-				);
-				//noinspection unchecked
-				( (AttributeContainer<X>) jpaMappingType ).getInFlightAccess().applyIdAttribute( attribute );
+				final SingularPersistentAttribute<X, ?> attribute =
+						(SingularPersistentAttribute<X, ?>)
+								buildAttribute(
+										declaredIdentifierProperty,
+										jpaMappingType,
+										attributeFactory::buildIdAttribute
+								);
+				attributeContainer.getInFlightAccess().applyIdAttribute( attribute );
 			}
 		}
 		//a MappedSuperclass can have no identifier if the id is set below in the hierarchy
 		else if ( mappingType.getIdentifierMapper() != null ) {
-			Set<SingularPersistentAttribute<? super X, ?>> attributes = buildIdClassAttributes(
-					jpaMappingType,
-					mappingType.getIdentifierMapper().getProperties()
-			);
-			//noinspection unchecked
-			( ( AttributeContainer<X>) jpaMappingType ).getInFlightAccess().applyIdClassAttributes( attributes );
+			final Set<SingularPersistentAttribute<? super X, ?>> attributes =
+					buildIdClassAttributes(
+							jpaMappingType,
+							mappingType.getIdentifierMapper().getProperties()
+					);
+			attributeContainer.getInFlightAccess().applyIdClassAttributes( attributes );
 		}
 	}
 
@@ -808,13 +833,26 @@ public class MetadataContext {
 //								+ "; expected type :  " + attribute.getClass().getName()
 //								+ "; encountered type : " + field.getType().getName()
 //				);
-			LOG.illegalArgumentOnStaticMetamodelFieldInjection(
-					metamodelClass.getName(),
-					name,
-					model.getClass().getName(),
-					field.getType().getName()
-			);
+			// Avoid logging an error for Enver's default revision classes that are both entities and mapped-supers.
+			// This is a workaround for https://hibernate.atlassian.net/browse/HHH-17612
+			if ( !isDefaultEnversRevisionType( metamodelClass ) ) {
+				LOG.illegalArgumentOnStaticMetamodelFieldInjection(
+						metamodelClass.getName(),
+						name,
+						model.getClass().getName(),
+						field.getType().getName()
+				);
+			}
 		}
+	}
+
+	private static boolean isDefaultEnversRevisionType(Class<?> metamodelClass) {
+		return Set.of(
+				"org.hibernate.envers.DefaultRevisionEntity_",
+				"org.hibernate.envers.DefaultTrackingModifiedEntitiesRevisionEntity_",
+				"org.hibernate.envers.enhanced.SequenceIdRevisionEntity_",
+				"org.hibernate.envers.enhanced.SequenceIdTrackingModifiedEntitiesRevisionEntity_"
+		).contains( metamodelClass.getName() );
 	}
 
 	public MappedSuperclassDomainType<?> locateMappedSuperclassType(MappedSuperclass mappedSuperclass) {

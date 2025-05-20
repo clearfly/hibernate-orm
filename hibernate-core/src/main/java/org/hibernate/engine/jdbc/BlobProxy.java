@@ -38,6 +38,8 @@ public final class BlobProxy implements Blob, BlobImplementer {
 	// no longer necessary. The class name could be updated to reflect this but that would break APIs.
 
 	private final BinaryStream binaryStream;
+	private final int markBytes;
+	private boolean resetAllowed;
 	private boolean needsReset;
 
 	/**
@@ -47,7 +49,9 @@ public final class BlobProxy implements Blob, BlobImplementer {
 	 * @see #generateProxy(byte[])
 	 */
 	private BlobProxy(byte[] bytes) {
-		binaryStream = new BinaryStreamImpl( bytes );
+		binaryStream = new BinaryStreamImpl(bytes);
+		markBytes = bytes.length + 1;
+		setStreamMark();
 	}
 
 	/**
@@ -59,6 +63,19 @@ public final class BlobProxy implements Blob, BlobImplementer {
 	 */
 	private BlobProxy(InputStream stream, long length) {
 		this.binaryStream = new StreamBackedBinaryStream( stream, length );
+		this.markBytes = (int) length + 1;
+		setStreamMark();
+	}
+
+	private void setStreamMark() {
+		final InputStream inputStream = binaryStream.getInputStream();
+		if ( inputStream != null && inputStream.markSupported() ) {
+			inputStream.mark( markBytes );
+			resetAllowed = true;
+		}
+		else {
+			resetAllowed = false;
+		}
 	}
 
 	private InputStream getStream() throws SQLException {
@@ -73,7 +90,14 @@ public final class BlobProxy implements Blob, BlobImplementer {
 	private void resetIfNeeded() throws SQLException {
 		try {
 			if ( needsReset ) {
-				binaryStream.getInputStream().reset();
+				final InputStream inputStream = binaryStream.getInputStream();
+				if ( !resetAllowed && inputStream != null) {
+					throw new SQLException( "Underlying stream does not allow reset" );
+				}
+				if ( inputStream != null ) {
+					inputStream.reset();
+					setStreamMark();
+				}
 			}
 		}
 		catch ( IOException ioe) {
@@ -95,6 +119,11 @@ public final class BlobProxy implements Blob, BlobImplementer {
 
 	/**
 	 * Generates a BlobImpl proxy using a given number of bytes from an InputStream.
+	 *
+	 * Be aware that certain database drivers will automatically close the provided InputStream after the
+	 * contents have been written to the database.  This may cause unintended side effects if the entity
+	 * is also audited by Envers.  In this case, it's recommended to use {@link #generateProxy(byte[])}
+	 * instead as it isn't affected by this non-standard behavior.
 	 *
 	 * @param stream The input stream of bytes to be created as a Blob.
 	 * @param length The number of bytes from stream to be written to the Blob.

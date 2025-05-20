@@ -478,7 +478,7 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 	private boolean deduplicateSelectionItems;
 	private ForeignKeyDescriptor.Nature currentlyResolvingForeignKeySide;
 	private SqmStatement<?> currentSqmStatement;
-	private SqmQueryPart<?> currentSqmQueryPart;
+	private Stack<SqmQueryPart> sqmQueryPartStack = new StandardStack<>( SqmQueryPart.class );
 	private CteContainer cteContainer;
 	/**
 	 * A map from {@link SqmCteTable#getCteName()} to the final SQL name.
@@ -784,9 +784,10 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 		return currentClauseStack;
 	}
 
+	@SuppressWarnings("rawtypes")
 	@Override
-	public SqmQueryPart<?> getCurrentSqmQueryPart() {
-		return currentSqmQueryPart;
+	public Stack<SqmQueryPart> getSqmQueryPartStack() {
+		return sqmQueryPartStack;
 	}
 
 	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1270,11 +1271,6 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 					this
 			);
 
-			if ( !rootTableGroup.getTableReferenceJoins().isEmpty()
-					|| !rootTableGroup.getTableGroupJoins().isEmpty() ) {
-				throw new HibernateException( "Not expecting multiple table references for an SQM INSERT-SELECT" );
-			}
-
 			getFromClauseAccess().registerTableGroup( rootPath, rootTableGroup );
 
 			final InsertSelectStatement insertStatement = new InsertSelectStatement(
@@ -1290,9 +1286,8 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 					rootTableGroup
 			);
 
-			if ( !rootTableGroup.getTableReferenceJoins().isEmpty()
-					|| !rootTableGroup.getTableGroupJoins().isEmpty() ) {
-				throw new SemanticException( "Not expecting multiple table references for an SQM INSERT-SELECT" );
+			if ( hasJoins( rootTableGroup ) ) {
+				throw new HibernateException( "Not expecting multiple table references for an SQM INSERT-SELECT" );
 			}
 
 			for ( SqmValues sqmValues : sqmStatement.getValuesList() ) {
@@ -1735,8 +1730,7 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 							);
 							final DelegatingSqmAliasedNodeCollector collector = (DelegatingSqmAliasedNodeCollector) processingState
 									.getSqlExpressionResolver();
-							final SqmQueryPart<?> oldSqmQueryPart = currentSqmQueryPart;
-							currentSqmQueryPart = queryGroup;
+							sqmQueryPartStack.push( queryGroup );
 							pushProcessingState( processingState );
 
 							try {
@@ -1780,7 +1774,7 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 							}
 							finally {
 								popProcessingStateStack();
-								currentSqmQueryPart = oldSqmQueryPart;
+								sqmQueryPartStack.pop();
 							}
 						}
 						finally {
@@ -1993,13 +1987,16 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 		);
 		final DelegatingSqmAliasedNodeCollector collector = (DelegatingSqmAliasedNodeCollector) processingState
 				.getSqlExpressionResolver();
-		final SqmQueryPart<?> sqmQueryPart = currentSqmQueryPart;
-		currentSqmQueryPart = queryGroup;
+		sqmQueryPartStack.push( queryGroup );
 		pushProcessingState( processingState );
 
+		FromClauseIndex firstQueryPartIndex = null;
+		SqlAstProcessingState firstPoppedProcessingState = null;
 		try {
 			newQueryParts.add( visitQueryPart( queryParts.get( 0 ) ) );
 
+			firstQueryPartIndex = lastPoppedFromClauseIndex;
+			firstPoppedProcessingState = lastPoppedProcessingState;
 			collector.setSqmAliasedNodeCollector(
 					(SqmAliasedNodeCollector) lastPoppedProcessingState.getSqlExpressionResolver()
 			);
@@ -2016,7 +2013,9 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 		}
 		finally {
 			popProcessingStateStack();
-			currentSqmQueryPart = sqmQueryPart;
+			sqmQueryPartStack.pop();
+			lastPoppedFromClauseIndex = firstQueryPartIndex;
+			lastPoppedProcessingState = firstPoppedProcessingState;
 		}
 	}
 
@@ -2076,9 +2075,8 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 			);
 		}
 
-		final SqmQueryPart<?> sqmQueryPart = currentSqmQueryPart;
 		final boolean originalDeduplicateSelectionItems = deduplicateSelectionItems;
-		currentSqmQueryPart = sqmQuerySpec;
+		sqmQueryPartStack.push( sqmQuerySpec );
 		// In sub-queries, we can never deduplicate the selection items as that might change semantics
 		deduplicateSelectionItems = false;
 		pushProcessingState( processingState );
@@ -2145,7 +2143,7 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 			inNestedContext = oldInNestedContext;
 			popProcessingStateStack();
 			queryTransformers.pop();
-			currentSqmQueryPart = sqmQueryPart;
+			sqmQueryPartStack.pop();
 			deduplicateSelectionItems = originalDeduplicateSelectionItems;
 		}
 	}
@@ -2211,7 +2209,7 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 		try {
 			final SelectClause sqlSelectClause = currentQuerySpec().getSelectClause();
 			if ( selectClause == null ) {
-				final SqmFrom<?, ?> implicitSelection = determineImplicitSelection( (SqmQuerySpec<?>) currentSqmQueryPart );
+				final SqmFrom<?, ?> implicitSelection = determineImplicitSelection( (SqmQuerySpec<?>) getCurrentSqmQueryPart() );
 				visitSelection( 0, new SqmSelection<>( implicitSelection, implicitSelection.nodeBuilder() ) );
 			}
 			else {
@@ -2236,7 +2234,7 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 	@Override
 	public Void visitSelection(SqmSelection<?> sqmSelection) {
 		return visitSelection(
-				currentSqmQueryPart.getFirstQuerySpec().getSelectClause().getSelections().indexOf( sqmSelection ),
+				getCurrentSqmQueryPart().getFirstQuerySpec().getSelectClause().getSelections().indexOf( sqmSelection ),
 				sqmSelection
 		);
 	}
@@ -2355,7 +2353,7 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 			// To avoid this issue, we determine the position and let the SqlAstTranslator handle the rest.
 			// Usually it will render `select ?, count(*) from dual group by 1` if supported
 			// or force rendering the parameter as literal instead so that the database can see the grouping is fine
-			final SqmQuerySpec<?> querySpec = currentSqmQueryPart.getFirstQuerySpec();
+			final SqmQuerySpec<?> querySpec = getCurrentSqmQueryPart().getFirstQuerySpec();
 			sqmPosition = indexOfExpression( querySpec.getSelectClause().getSelections(), groupByClauseExpression );
 			path = null;
 		}
@@ -2383,7 +2381,7 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 						continue OUTER;
 					}
 				}
-				if ( currentSqmQueryPart instanceof SqmQueryGroup<?> ) {
+				if ( getCurrentSqmQueryPart() instanceof SqmQueryGroup<?> ) {
 					// Reusing the SqlSelection for query groups would be wrong because the aliases do no exist
 					// So we have to use a literal expression in a new SqlSelection instance to refer to the position
 					expressions.add(
@@ -5629,40 +5627,7 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 			final BasicValuedMapping basicValuedMapping = (BasicValuedMapping) inferableExpressible;
 			final BasicValueConverter valueConverter = basicValuedMapping.getJdbcMapping().getValueConverter();
 			if ( valueConverter != null ) {
-				final Object value = literal.getLiteralValue();
-				final Object sqlLiteralValue;
-				// For converted query literals, we support both, the domain and relational java type
-				if ( value == null || valueConverter.getDomainJavaType().isInstance( value ) ) {
-					sqlLiteralValue = valueConverter.toRelationalValue( value );
-				}
-				else if ( valueConverter.getRelationalJavaType().isInstance( value ) ) {
-					sqlLiteralValue = value;
-				}
-				else if ( Character.class.isAssignableFrom( valueConverter.getRelationalJavaType().getJavaTypeClass() )
-						&& value instanceof CharSequence && ( (CharSequence) value ).length() == 1 ) {
-					sqlLiteralValue = ( (CharSequence) value ).charAt( 0 );
-				}
-				// In HQL, number literals might not match the relational java type exactly,
-				// so we allow coercion between the number types
-				else if ( Number.class.isAssignableFrom( valueConverter.getRelationalJavaType().getJavaTypeClass() )
-						&& value instanceof Number ) {
-					sqlLiteralValue = valueConverter.getRelationalJavaType().coerce(
-							value,
-							creationContext.getSessionFactory()::getTypeConfiguration
-					);
-				}
-				else {
-					throw new SemanticException(
-							String.format(
-									Locale.ROOT,
-									"Literal type '%s' did not match domain type '%s' nor converted type '%s'",
-									value.getClass(),
-									valueConverter.getDomainJavaType().getJavaTypeClass().getName(),
-									valueConverter.getRelationalJavaType().getJavaTypeClass().getName()
-							)
-					);
-				}
-				return new QueryLiteral<>( sqlLiteralValue, basicValuedMapping );
+				return new QueryLiteral<>( sqlLiteralValue( valueConverter, literal.getLiteralValue() ), basicValuedMapping );
 			}
 		}
 
@@ -5775,6 +5740,40 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 											.getJavaType()
 											.getName()
 							)
+			);
+		}
+	}
+
+	private <D> Object sqlLiteralValue(BasicValueConverter<D,?> valueConverter, D value) {
+		// For converted query literals, we support both, the domain and relational java type
+		if ( value == null || valueConverter.getDomainJavaType().isInstance( value ) ) {
+			return valueConverter.toRelationalValue( value );
+		}
+		else if ( valueConverter.getRelationalJavaType().isInstance( value ) ) {
+			return value;
+		}
+		else if ( Character.class.isAssignableFrom( valueConverter.getRelationalJavaType().getJavaTypeClass() )
+				&& value instanceof CharSequence && ( (CharSequence) value ).length() == 1 ) {
+			return ( (CharSequence) value ).charAt( 0 );
+		}
+		// In HQL, number literals might not match the relational java type exactly,
+		// so we allow coercion between the number types
+		else if ( Number.class.isAssignableFrom( valueConverter.getRelationalJavaType().getJavaTypeClass() )
+				&& value instanceof Number ) {
+			return valueConverter.getRelationalJavaType().coerce(
+					value,
+					creationContext.getSessionFactory()::getTypeConfiguration
+			);
+		}
+		else {
+			throw new SemanticException(
+					String.format(
+							Locale.ROOT,
+							"Literal type '%s' did not match domain type '%s' nor converted type '%s'",
+							value.getClass(),
+							valueConverter.getDomainJavaType().getJavaTypeClass().getName(),
+							valueConverter.getRelationalJavaType().getJavaTypeClass().getName()
+					)
 			);
 		}
 	}
@@ -6297,7 +6296,14 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 					final QueryParameterBinding<?> binding = domainParameterBindings.getBinding(
 							domainParameterXref.getQueryParameter( expression )
 					);
-					final Object bindValue = binding.getBindValue();
+					final Object bindValue;
+					if ( binding.isMultiValued() ) {
+						final Collection<?> bindValues = binding.getBindValues();
+						bindValue = !bindValues.isEmpty() ? bindValues.iterator().next() : null;
+					}
+					else {
+						bindValue = binding.getBindValue();
+					}
 					if ( bindValue != null ) {
 						if ( bindValue instanceof BigInteger ) {
 							int precision = bindValue.toString().length() - ( ( (BigInteger) bindValue ).signum() < 0 ? 1 : 0 );
@@ -7355,12 +7361,13 @@ public abstract class BaseSqmToSqlAstConverter<T extends Statement> extends Base
 		);
 	}
 
+	@SuppressWarnings({"unchecked", "rawtypes"})
 	@Override
 	public Object visitFieldLiteral(SqmFieldLiteral<?> sqmFieldLiteral) {
-		return new QueryLiteral<>(
-				sqmFieldLiteral.getValue(),
-				(BasicValuedMapping) determineValueMapping( sqmFieldLiteral )
-		);
+		final BasicValuedMapping valueMapping = (BasicValuedMapping) determineValueMapping( sqmFieldLiteral );
+		final Object value = sqmFieldLiteral.getValue();
+		final BasicValueConverter converter = valueMapping.getJdbcMapping().getValueConverter();
+		return new QueryLiteral<>( converter != null ? sqlLiteralValue( converter, value ) : value, valueMapping );
 	}
 
 	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

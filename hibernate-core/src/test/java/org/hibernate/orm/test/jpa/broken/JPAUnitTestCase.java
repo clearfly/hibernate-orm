@@ -7,23 +7,22 @@ package org.hibernate.orm.test.jpa.broken;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Root;
+import java.util.List;
+import java.util.Objects;
+import java.util.stream.LongStream;
 import org.hibernate.orm.test.jpa.BaseEntityManagerFunctionalTestCase;
+import org.hibernate.testing.bytecode.enhancement.CustomEnhancementContext;
+import org.hibernate.testing.bytecode.enhancement.extension.BytecodeEnhanced;
+import static org.hibernate.testing.transaction.TransactionUtil.doInJPA;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.stream.LongStream;
-
-import static org.hibernate.testing.transaction.TransactionUtil.doInJPA;
-
 public class JPAUnitTestCase extends BaseEntityManagerFunctionalTestCase {
-
 
     @Override
     public Class<?>[] getAnnotatedClasses() {
-        return new Class[]{RateCenter.class, ThirdParty.class, Provider.class, VoiceGroup.class, TelephoneNumber.class};
+        return new Class[] { RateCenter.class, ThirdParty.class, Provider.class, VoiceGroup.class, TelephoneNumber.class };
     }
 
     @Before
@@ -70,19 +69,26 @@ public class JPAUnitTestCase extends BaseEntityManagerFunctionalTestCase {
     public void testThatPasses() {
         EntityManager em = getOrCreateEntityManager();
         em.getTransaction().begin();
-        VoiceGroup voiceGroup = em.find(VoiceGroup.class, 1,
-                Map.of("jakarta.persistence.fetchgraph", em.getEntityGraph("voiceGroup.graph")));
-        Objects.requireNonNull(voiceGroup.getPrimaryNumber().getRateCenter().getName());
-        allNumbersWithThirdPartyFetch(em, voiceGroup).forEach(telephoneNumber -> Objects.requireNonNull(telephoneNumber.getProvider().getName()));
+        VoiceGroup voiceGroup = em.find(VoiceGroup.class, 1);
+        lazyLoadCheck(voiceGroup.getPrimaryNumber().getRateCenter());
+        List<TelephoneNumber> numbers = currentNumbers(em, voiceGroup);
+        Assert.assertEquals(23, numbers.size());
         em.getTransaction().commit();
         em.close();
     }
 
-    private List<TelephoneNumber> allNumbersWithThirdPartyFetch(EntityManager em, VoiceGroup voiceGroup) {
+    private List<TelephoneNumber> currentNumbers(EntityManager em, VoiceGroup voiceGroup) {
         CriteriaQuery<TelephoneNumber> query = em.getCriteriaBuilder().createQuery(TelephoneNumber.class);
         Root<TelephoneNumber> root = query.from(TelephoneNumber.class);
-        root.fetch("provider");
-        query.where(em.getCriteriaBuilder().equal(root.get("voiceGroup"), voiceGroup));
+        root.fetch(TelephoneNumber_.rateCenter);
+        root.fetch(TelephoneNumber_.provider);
+        query.where(em.getCriteriaBuilder().equal(root.get(TelephoneNumber_.voiceGroup), voiceGroup));
         return em.createQuery(query).getResultList();
+    }
+
+    private void lazyLoadCheck(BaseEntity baseEntity) {
+        if (Objects.nonNull(baseEntity)) {
+            baseEntity.getEntityType();
+        }
     }
 }

@@ -4,9 +4,6 @@
  */
 package org.hibernate.orm.test.jpa.broken;
 
-import java.io.Serializable;
-import java.util.Objects;
-
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -14,87 +11,98 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Transient;
 import jakarta.persistence.Version;
+import jakarta.validation.constraints.NotNull;
+import java.util.Objects;
 
 @Entity
-public class TelephoneNumber implements Serializable {
+public class TelephoneNumber implements BaseEntity {
 
-	private Integer id;
-	private int version;
-	private String number;
-	private VoiceGroup voiceGroup;
-	private Provider provider;
-	private RateCenter rateCenter;
+    private Integer id;
+    private int version;
+    private String number;
+    private VoiceGroup voiceGroup;
+    private Provider provider;
+    private RateCenter rateCenter;
 
-	@Id
-	@GeneratedValue(strategy = GenerationType.IDENTITY)
-	public Integer getId() {
-		return id;
-	}
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    public Integer getId() {
+        return id;
+    }
 
-	public void setId(Integer id) {
-		this.id = id;
-	}
+    public void setId(Integer id) {
+        this.id = id;
+    }
 
-	@Version
-	public int getVersion() {
-		return version;
-	}
+    @Version
+    public int getVersion() {
+        return version;
+    }
 
-	public void setVersion(int version) {
-		this.version = version;
-	}
+    public void setVersion(int version) {
+        this.version = version;
+    }
 
-	public String getNumber() {
-		return number;
-	}
+    public String getNumber() {
+        return number;
+    }
 
-	public void setNumber(String number) {
-		this.number = number;
-	}
+    public void setNumber(String number) {
+        this.number = number;
+    }
 
-	@ManyToOne(fetch = FetchType.LAZY)
-	@JoinColumn(name = "voiceGroup", nullable = false)
-	public VoiceGroup getVoiceGroup() {
-		return voiceGroup;
-	}
+    @NotNull
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "voiceGroup", nullable = false)
+    public VoiceGroup getVoiceGroup() {
+        return voiceGroup;
+    }
 
-	public void setVoiceGroup(VoiceGroup voiceGroup) {
-		this.voiceGroup = voiceGroup;
-	}
+    public void setVoiceGroup(VoiceGroup voiceGroup) {
+        this.voiceGroup = voiceGroup;
+    }
 
-	@ManyToOne(fetch = FetchType.LAZY)
-	@JoinColumn(name = "provider", nullable = false)
-	public Provider getProvider() {
-		return provider;
-	}
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "provider", nullable = false)
+    public Provider getProvider() {
+        return provider;
+    }
 
-	public void setProvider(Provider provider) {
-		this.provider = provider;
-	}
+    public void setProvider(Provider provider) {
+        this.provider = provider;
+    }
 
-	@ManyToOne(fetch = FetchType.LAZY)
-	@JoinColumn(name = "rateCenter", nullable = false)
-	public RateCenter getRateCenter() {
-		return rateCenter;
-	}
+    @NotNull
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "rateCenter", nullable = false)
+    public RateCenter getRateCenter() {
+        return rateCenter;
+    }
 
-	public void setRateCenter(RateCenter rateCenter) {
-		this.rateCenter = rateCenter;
-	}
+    public void setRateCenter(RateCenter rateCenter) {
+        this.rateCenter = rateCenter;
+    }
 
-	@Override
-	public boolean equals(Object o) {
-		if ( o instanceof TelephoneNumber telephoneNumber ) {
-			return this == o || getId().equals( telephoneNumber.getId() );
-		}
-		else {
-			return false;
-		}
-	}
+    @Override
+    public boolean equals(Object o) {
+        if (o instanceof TelephoneNumber telephoneNumber) {
+            return this == o || getId().equals(telephoneNumber.getId());
+        }
+        else {
+            return false;
+        }
+    }
 
-	@Override
-	public int hashCode() {
-		return Objects.hashCode( id );
-	}
+    @Override
+    public int hashCode() {
+        return Objects.hashCode(id);
+    }
+
+    @Override
+    @Transient
+    public EntityType getEntityType() {
+        return EntityType.TELEPHONE_NUMBER;
+    }
 }

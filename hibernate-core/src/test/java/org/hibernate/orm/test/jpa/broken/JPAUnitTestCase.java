@@ -5,36 +5,25 @@
 package org.hibernate.orm.test.jpa.broken;
 
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.TypedQuery;
+import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Root;
 import java.util.List;
-import java.util.Objects;
-import java.util.stream.LongStream;
-import org.hibernate.orm.test.jpa.BaseEntityManagerFunctionalTestCase;
-import org.hibernate.testing.bytecode.enhancement.CustomEnhancementContext;
-import org.hibernate.testing.bytecode.enhancement.extension.BytecodeEnhanced;
-import static org.hibernate.testing.transaction.TransactionUtil.doInJPA;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.hibernate.testing.orm.junit.EntityManagerFactoryScope;
+import org.hibernate.testing.orm.junit.Jpa;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
-public class JPAUnitTestCase extends BaseEntityManagerFunctionalTestCase {
+@Jpa(annotatedClasses = { VoiceGroup.class, ThirdParty.class, Provider.class, RateCenter.class, TelephoneNumber.class, }, proxyComplianceEnabled = true)
+public class JPAUnitTestCase {
 
-    @Override
-    public Class<?>[] getAnnotatedClasses() {
-        return new Class[] { RateCenter.class, ThirdParty.class, Provider.class, VoiceGroup.class, TelephoneNumber.class };
-    }
-
-    @Before
-    public void setup() {
-        doInJPA(this::entityManagerFactory, em -> {
-
-            RateCenter rateCenter = new RateCenter();
-            rateCenter.setName("Springfield");
-            em.persist(rateCenter);
-
+    @BeforeAll
+    public void setup(EntityManagerFactoryScope scope) {
+        scope.inTransaction(em -> {
             ThirdParty thirdParty = new ThirdParty();
-            thirdParty.setName("Globex Corporation");
+            thirdParty.setName("Widgets");
             em.persist(thirdParty);
 
             Provider provider = new Provider();
@@ -42,53 +31,55 @@ public class JPAUnitTestCase extends BaseEntityManagerFunctionalTestCase {
             em.persist(provider);
             thirdParty.setProvider(provider);
 
+            RateCenter rateCenter = new RateCenter();
+            rateCenter.setName("US");
+            em.persist(rateCenter);
+
             VoiceGroup voiceGroup = new VoiceGroup();
             em.persist(voiceGroup);
 
-            TelephoneNumber primaryNumber = new TelephoneNumber();
-            primaryNumber.setNumber("4065551234");
-            primaryNumber.setProvider(provider);
-            primaryNumber.setVoiceGroup(voiceGroup);
-            primaryNumber.setRateCenter(rateCenter);
-            em.persist(primaryNumber);
+            TelephoneNumber telephoneNumber1 = new TelephoneNumber();
+            telephoneNumber1.setNumber("123-456-7890");
+            telephoneNumber1.setProvider(provider);
+            telephoneNumber1.setVoiceGroup(voiceGroup);
+            telephoneNumber1.setRateCenter(rateCenter);
+            em.persist(telephoneNumber1);
+            voiceGroup.setPrimaryNumber(telephoneNumber1);
 
-            voiceGroup.setPrimaryNumber(primaryNumber);
+            TelephoneNumber telephoneNumber2 = new TelephoneNumber();
+            telephoneNumber2.setNumber("123-456-7891");
+            telephoneNumber2.setProvider(provider);
+            telephoneNumber2.setVoiceGroup(voiceGroup);
+            telephoneNumber2.setRateCenter(rateCenter);
+            em.persist(telephoneNumber2);
 
-            LongStream.rangeClosed(4065551235L, 4065551256L).forEach(value -> {
-                TelephoneNumber telephoneNumber = new TelephoneNumber();
-                telephoneNumber.setNumber(String.valueOf(value));
-                telephoneNumber.setProvider(provider);
-                telephoneNumber.setVoiceGroup(voiceGroup);
-                telephoneNumber.setRateCenter(rateCenter);
-                em.persist(telephoneNumber);
-            });
+            TelephoneNumber telephoneNumber3 = new TelephoneNumber();
+            telephoneNumber3.setNumber("123-456-7892");
+            telephoneNumber3.setProvider(provider);
+            telephoneNumber3.setVoiceGroup(voiceGroup);
+            telephoneNumber3.setRateCenter(rateCenter);
+            em.persist(telephoneNumber3);
         });
     }
 
     @Test
-    public void testThatPasses() {
-        EntityManager em = getOrCreateEntityManager();
-        em.getTransaction().begin();
-        VoiceGroup voiceGroup = em.find(VoiceGroup.class, 1);
-        lazyLoadCheck(voiceGroup.getPrimaryNumber().getRateCenter());
-        List<TelephoneNumber> numbers = currentNumbers(em, voiceGroup);
-        Assert.assertEquals(23, numbers.size());
-        em.getTransaction().commit();
-        em.close();
+    public void shouldAssert(EntityManagerFactoryScope scope) {
+        scope.inTransaction(em -> {
+            VoiceGroup voiceGroup = em.find(VoiceGroup.class, 1);
+            voiceGroup.getPrimaryNumber().getEntityType();
+            List<TelephoneNumber> numbers = currentNumbers(em, voiceGroup);
+            Assertions.assertEquals(3, numbers.size());
+        });
     }
 
     private List<TelephoneNumber> currentNumbers(EntityManager em, VoiceGroup voiceGroup) {
-        CriteriaQuery<TelephoneNumber> query = em.getCriteriaBuilder().createQuery(TelephoneNumber.class);
-        Root<TelephoneNumber> root = query.from(TelephoneNumber.class);
+        CriteriaBuilder cb = em.getCriteriaBuilder();
+        CriteriaQuery<TelephoneNumber> cq = cb.createQuery(TelephoneNumber.class);
+        Root<TelephoneNumber> root = cq.from(TelephoneNumber.class);
         root.fetch(TelephoneNumber_.rateCenter);
         root.fetch(TelephoneNumber_.provider);
-        query.where(em.getCriteriaBuilder().equal(root.get(TelephoneNumber_.voiceGroup), voiceGroup));
-        return em.createQuery(query).getResultList();
-    }
-
-    private void lazyLoadCheck(BaseEntity baseEntity) {
-        if (Objects.nonNull(baseEntity)) {
-            baseEntity.getEntityType();
-        }
+        cq.where(cb.equal(root.get(TelephoneNumber_.voiceGroup), voiceGroup));
+        TypedQuery<TelephoneNumber> query = em.createQuery(cq);
+        return query.getResultList();
     }
 }

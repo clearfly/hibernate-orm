@@ -959,7 +959,7 @@ public class EntityInitializerImpl extends AbstractInitializer<EntityInitializer
 					? entityDescriptor
 					: determineConcreteEntityDescriptor( rowProcessingState, discriminatorAssembler, entityDescriptor );
 			assert data.concreteDescriptor != null;
-			resolveEntityKey( data, lazyInitializer.getIdentifier() );
+			resolveEntityKey( data, lazyInitializer.getInternalIdentifier() );
 			data.entityHolder = persistenceContext.claimEntityHolderIfPossible(
 					data.entityKey,
 					null,
@@ -974,7 +974,7 @@ public class EntityInitializerImpl extends AbstractInitializer<EntityInitializer
 		else {
 			data.entityInstanceForNotify = lazyInitializer.getImplementation();
 			data.concreteDescriptor = session.getEntityPersister( null, data.entityInstanceForNotify );
-			resolveEntityKey( data, lazyInitializer.getIdentifier() );
+			resolveEntityKey( data, lazyInitializer.getInternalIdentifier() );
 			data.entityHolder = persistenceContext.getEntityHolder( data.entityKey );
 			// Even though the lazyInitializer reports it is initialized, check if the entity holder reports initialized,
 			// because in a nested initialization scenario, this nested initializer must initialize the entity
@@ -1634,6 +1634,10 @@ public class EntityInitializerImpl extends AbstractInitializer<EntityInitializer
 						castNonNull( discriminatorAssembler ),
 						entityDescriptor
 				);
+				if ( data.concreteDescriptor == null ) {
+					// this should imply the entity is missing
+					return;
+				}
 			}
 		}
 		resolveEntityState( data );

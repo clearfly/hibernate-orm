@@ -221,15 +221,18 @@ public class HibernateProcessor extends AbstractProcessor {
 		final PackageElement jakartaContextPackage =
 				context.getProcessingEnvironment().getElementUtils()
 						.getPackageElement( "jakarta.enterprise.context" );
-		final PackageElement jakartaTransactionsPackage =
+		final PackageElement jakartaTransactionPackage =
 				context.getProcessingEnvironment().getElementUtils()
-						.getPackageElement( "jakarta.transactions" );
+						.getPackageElement( "jakarta.transaction" );
 		final PackageElement jakartaDataPackage =
 				context.getProcessingEnvironment().getElementUtils()
 						.getPackageElement( "jakarta.data" );
 		final PackageElement quarkusOrmPackage =
 				context.getProcessingEnvironment().getElementUtils()
 						.getPackageElement( "io.quarkus.hibernate.orm" );
+		final PackageElement quarkusReactivePackage =
+				context.getProcessingEnvironment().getElementUtils()
+						.getPackageElement( "io.quarkus.hibernate.reactive.runtime" );
 
 		PackageElement quarkusOrmPanachePackage =
 				context.getProcessingEnvironment().getElementUtils()
@@ -251,8 +254,8 @@ public class HibernateProcessor extends AbstractProcessor {
 		context.setAddNonnullAnnotation( packagePresent(jakartaAnnotationPackage) );
 		context.setAddGeneratedAnnotation( packagePresent(jakartaAnnotationPackage) );
 		context.setAddDependentAnnotation( packagePresent(jakartaContextPackage) );
-		context.setAddTransactionScopedAnnotation( packagePresent(jakartaTransactionsPackage) );
-		context.setQuarkusInjection( packagePresent(quarkusOrmPackage) );
+		context.setAddTransactionScopedAnnotation( packagePresent(jakartaTransactionPackage) );
+		context.setQuarkusInjection( packagePresent(quarkusOrmPackage) || packagePresent(quarkusReactivePackage) );
 		context.setUsesQuarkusOrm( packagePresent(quarkusOrmPanachePackage) );
 		context.setUsesQuarkusReactive( packagePresent(quarkusReactivePanachePackage) );
 

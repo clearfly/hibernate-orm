@@ -14,9 +14,7 @@ if ( !env.CHANGE_ID ) {
 }
 
 pipeline {
-    agent {
-        label 'LongDuration'
-    }
+    agent none
     tools {
         jdk 'OpenJDK 17 Latest'
     }
@@ -26,7 +24,15 @@ pipeline {
         skipDefaultCheckout()
     }
     stages {
+        stage('Checks') {
+        	steps {
+                requireApprovalForPullRequest 'hibernate'
+            }
+        }
         stage('Build') {
+            agent {
+                label 'LongDuration'
+            }
         	steps {
                 requireApprovalForPullRequest 'hibernate'
 				script {
@@ -42,6 +48,9 @@ pipeline {
 					}
 					dir('quarkus') {
 						sh "git clone -b 3.15 --single-branch https://github.com/quarkusio/quarkus.git . || git reset --hard && git clean -fx && git pull"
+						// This is a temporary workaround because Quarkus reverted the Hibernate ORM and Reactive upgrade.
+						// Remove this once Quarkus upgrades the versions again
+						sh "git reset --hard f42166ee7041ed09b7183d5dbf3ece2439b16676"
         				script {
 							def sedStatus = sh (script: "sed -i 's@<hibernate-orm.version>.*</hibernate-orm.version>@<hibernate-orm.version>${env.HIBERNATE_VERSION}</hibernate-orm.version>@' pom.xml", returnStatus: true)
 							if ( sedStatus != 0 ) {
@@ -58,7 +67,7 @@ pipeline {
 							// Need to override the default maven configuration this way, because there is no other way to do it
 							sh "sed -i 's/-Xmx2048m/-Xmx1340m/' ./.mvn/jvm.config"
 							sh "sed -i 's/MaxMetaspaceSize=1024m/MaxMetaspaceSize=512m/' ./.mvn/jvm.config"
-							def excludes = "'!integration-tests/kafka-oauth-keycloak,!integration-tests/kafka-sasl-elytron,!integration-tests/hibernate-search-orm-opensearch,!integration-tests/maven,!integration-tests/quartz,!integration-tests/reactive-messaging-kafka,!integration-tests/resteasy-reactive-kotlin/standard,!integration-tests/opentelemetry-reactive-messaging,!integration-tests/virtual-threads/kafka-virtual-threads,!integration-tests/smallrye-jwt-oidc-webapp,!docs'"
+							def excludes = "'!integration-tests/kafka-oauth-keycloak,!integration-tests/kafka-sasl-elytron,!integration-tests/hibernate-search-orm-opensearch,!integration-tests/maven,!integration-tests/quartz,!integration-tests/reactive-messaging-kafka,!integration-tests/resteasy-reactive-kotlin/standard,!integration-tests/opentelemetry-reactive-messaging,!integration-tests/virtual-threads/kafka-virtual-threads,!integration-tests/smallrye-jwt-oidc-webapp,!extensions/oidc-db-token-state-manager/deployment,!docs'"
 							sh "TESTCONTAINERS_RYUK_CONTAINER_PRIVILEGED=true ./mvnw -Dinsecure.repositories=WARN -pl :quarkus-hibernate-orm -amd -pl ${excludes} verify -Dstart-containers -Dtest-containers -Dskip.gradle.build"
 						}
 					}
@@ -68,9 +77,7 @@ pipeline {
     }
     post {
         always {
-    		configFileProvider([configFile(fileId: 'job-configuration.yaml', variable: 'JOB_CONFIGURATION_FILE')]) {
-            	notifyBuildResult maintainers: (String) readYaml(file: env.JOB_CONFIGURATION_FILE).notification?.email?.recipients
-            }
+            notifyBuildResult maintainers: "andrea@hibernate.org steve@hibernate.org christian.beikov@gmail.com mbellade@redhat.com"
         }
     }
 }

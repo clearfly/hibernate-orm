@@ -131,7 +131,8 @@ public class StatelessSessionImpl extends AbstractSharedSessionContract implemen
 		}
 		final Generator generator = persister.getGenerator();
 		if ( !generator.generatedOnExecution( entity, this ) ) {
-			id = ( (BeforeExecutionGenerator) generator).generate( this, entity, null, INSERT );
+			final Object currentValue = generator.allowAssignedIdentifiers() ? persister.getIdentifier( entity, this ) : null;
+			id = ( (BeforeExecutionGenerator) generator ).generate( this, entity, currentValue, INSERT );
 			if ( firePreInsert(entity, id, state, persister) ) {
 				return id;
 			}
@@ -702,7 +703,7 @@ public class StatelessSessionImpl extends AbstractSharedSessionContract implemen
 		if ( initializer != null ) {
 			if ( initializer.isUninitialized() ) {
 				final String entityName = initializer.getEntityName();
-				final Object id = initializer.getIdentifier();
+				final Object id = initializer.getInternalIdentifier();
 				initializer.setSession( this );
 				persistenceContext.beforeLoad();
 				try {
